@@ -1,0 +1,46 @@
+From 3dcc884c689681dda2d9ad24a9e219013f70cfe8 Mon Sep 17 00:00:00 2001
+From: Levi Zim <rsworktech@outlook.com>
+Date: Sun, 21 Jan 2024 19:29:02 +0800
+Subject: [PATCH] overlayfs:dont make DCACHE_OP_{HASH,COMPARE} weird
+
+Recent Android deprecated sdcardfs and uses native fs casefold
+functionality to achieve case insensitivity on /sdcard[1][2].
+
+However, this breaks overlayfs on userdata partition because this
+partition is now formatted with casefold option.
+
+Overlayfs checks DCACHE_OP_{HASH,COMPARE} to ensure the filesystem is
+case sensitive. However, this flags userdata partition as a false
+positive. Most of the userdata partition is indeed case sensitive
+except [3].
+
+So this patch workarounds the issue by removing the check, which is
+DANGEROUS! The responsibility to ensure fs case sensitivity is
+shifted to the users.
+
+Fixes overlayfs driver for docker.
+
+[1]: https://source.android.com/docs/core/storage/sdcardfs-deprecate
+[2]: https://android.googlesource.com/platform/system/vold/+/5b711b10dbbec26cd8157672f12566b525d0d2bb/model/PrivateVolume.cpp#170
+[3]: https://android.googlesource.com/platform/system/vold/+/5b711b10dbbec26cd8157672f12566b525d0d2bb/model/PrivateVolume.cpp#178
+
+Change-Id: Ia3a4a81e6772796b3400fd13b89c6f3677e35872
+---
+ fs/overlayfs/util.c | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/fs/overlayfs/util.c b/fs/overlayfs/util.c
+index 7eba49db7dd6..d3bb09b272cc 100644
+--- a/fs/overlayfs/util.c
++++ b/fs/overlayfs/util.c
+@@ -140,9 +140,7 @@ void ovl_dentry_init_flags(struct dentry *dentry, struct dentry *upperdentry,
+ bool ovl_dentry_weird(struct dentry *dentry)
+ {
+ 	return dentry->d_flags & (DCACHE_NEED_AUTOMOUNT |
+-				  DCACHE_MANAGE_TRANSIT |
+-				  DCACHE_OP_HASH |
+-				  DCACHE_OP_COMPARE);
++				  DCACHE_MANAGE_TRANSIT);
+ }
+ 
+ enum ovl_path_type ovl_path_type(struct dentry *dentry)
