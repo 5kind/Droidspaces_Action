@@ -231,6 +231,14 @@ jobs:
           name: boot${{ env.LOCALVERSION }}${{ env.UPLOADNAME }}-${{ env.DEVICE }}-${{ env.BUILD_TIME }}
           path: kernel_workspace/boot.img
 
+      - name: Upload real kernel config
+        if: env.ENABLE_STOCKCONFIG == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: config${{ env.LOCALVERSION }}${{ env.UPLOADNAME }}-${{ env.DEVICE }}-${{ env.BUILD_TIME }}
+          path: kernel_workspace/android-kernel/out/.config
+          include-hidden-files: true
+
   # Publishing is a separate job so the build itself runs with a read-only
   # token; only this job gets contents:write, and only when asked for.
   release:
@@ -258,6 +266,11 @@ jobs:
           done
           for f in artifacts/*/Image* artifacts/*/boot.img artifacts/*/dtbo.img; do
             [ -f "$f" ] && cp "$f" release/
+          done
+          for f in artifacts/*/.config; do
+            [ -f "$f" ] || continue
+            gzip -c "$f" > release/config.gz
+            break
           done
           ls -la release/
 

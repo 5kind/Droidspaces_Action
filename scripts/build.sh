@@ -132,6 +132,30 @@ build_kernel() {
 	fi
 
 	cd "$KERNEL_DIR"
+	if is_true "${ENABLE_STOCKCONFIG:-false}"; then
+		local stockconfig_found=false
+		read -ra flags <<< "${STOCKCONFIG_FLAGS}"
+		local stockconfig kernel_stockconfig
+		for flag in "${flags[@]}"; do
+			stockconfig="${DEVICE}${flag}_defconfig"
+			kernel_stockconfig="arch/${ARCH}/configs/${stockconfig}"
+			if [ -f "${kernel_stockconfig}" ]; then
+				info "Found stockconfig included in kernel tree: ${stockconfig}, skipping stockconfig generation"
+				stockconfig_found=true
+				break
+			fi
+		done
+		if ! is_true "${stockconfig_found}"; then
+			info "make ${args} ${stockconfig}"
+			git show HEAD:"arch/${ARCH}/configs/${KERNEL_CONFIG}" > "${kernel_stockconfig}"
+			# shellcheck disable=SC2086
+			make -j"$(nproc --all)" CC=clang $args "${stockconfig}" \
+				|| die "stockconfig generation failed"
+			mv -v "${OUT}/.config" "${kernel_stockconfig}"
+		fi
+		info "Use ${stockconfig} as /proc/config.gz to bypass VINTF check"
+		sed -i "s|^\(\$(obj)/config_data:\) \$(KCONFIG_CONFIG) FORCE|\1 ${kernel_stockconfig} FORCE|" "${STOCKCONFIG_MAKEFILE}"
+	fi
 	info "make ${args} ${KERNEL_CONFIG}"
 	# shellcheck disable=SC2086
 	make -j"$(nproc --all)" CC=clang $args "${KERNEL_CONFIG}" \

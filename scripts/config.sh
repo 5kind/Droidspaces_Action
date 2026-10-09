@@ -64,6 +64,15 @@ declare -A DEFAULTS=(
 	[ENABLE_PATH_UMOUNT]="false"
 	[ENABLE_HIDE_STUFF]="false"
 	[ENABLE_KPM]="false"
+	[ENABLE_CUSTOM_PATCHES]="false"
+	[ENABLE_DROIDSPACES]="false"
+	[SYSVIPC_KABI_PATCH]="001.GKI-below-6.12-fix_sysvipc_kabi_6_7_8.patch"
+	[DROIDSPACES_REPO]="https://github.com/ravindu644/Droidspaces-OSS.git"
+	[DROIDSPACES_BRANCH]="v6.6.0"
+	[DROIDSPACES_PATCHES_ROOT]="Documentation/resources/kernel-patches"
+	[ENABLE_STOCKCONFIG]="false"
+	[STOCKCONFIG_FLAGS]="-vts _stock"
+	[STOCKCONFIG_MAKEFILE]="kernel/Makefile"
 
 	# Kconfig tweaks
 	[ADD_KPROBES_CONFIG]="false"

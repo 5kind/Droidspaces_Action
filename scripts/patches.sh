@@ -361,6 +361,162 @@ kpm_patch_image() {
 	endgroup
 }
 
+# =============================================================== Custom Patches
+
+# Also modifies ${KERNEL_DIR}/scripts/setlocalversion to remove "-dirty"
+custom_apply() {
+	cd "$KERNEL_DIR"
+	group "Applying custom patches"
+	for patch in "${REPO_ROOT}"/patches/*.patch; do
+		[ -f "${patch}" ] || continue
+		apply_patch "${patch}" 1 || warn "Custom patch ${patch} did not apply cleanly, continuing"
+	done
+	if [ -f "${KERNEL_DIR}/scripts/setlocalversion" ]; then
+		sed -i 's/-dirty//g' "${KERNEL_DIR}/scripts/setlocalversion"
+	fi
+	if [ -f "${REPO_ROOT}/patches/custom.sh" ]; then
+		. "${REPO_ROOT}/patches/custom.sh"
+	fi
+
+	endgroup
+}
+
+# ================================================================== Droidspaces
+
+droidspaces_apply() {
+	local kver patch_dir
+	kver=$(kernel_version "$KERNEL_DIR")
+
+	group "Applying Droidspaces ${DROIDSPACES_BRANCH} (kernel ${kver})"
+	cd "$KERNEL_DIR"
+
+	local dir="${WORKSPACE}/Droidspaces"
+	if [ ! -d "$dir" ]; then
+		retry 3 git clone -q --depth=1 --branch "${DROIDSPACES_BRANCH}" "${DROIDSPACES_REPO}" "$dir" \
+			|| die "failed to clone ${DROIDSPACES_REPO}"
+	fi
+
+	case "$kver" in
+		6.12)			patch_dir="GKI/kernel-6.12";;
+		5.*|6.1|6.6)	patch_dir="GKI/below-kernel-6.12";;
+		3.*|4.*)		patch_dir="non-GKI";;
+		*)				die "unsupported kernel version for Droidspaces: $kver" ;;
+	esac
+
+	local patch_root="${dir}/${DROIDSPACES_PATCHES_ROOT}/${patch_dir}"
+	if [[ "$patch_dir" == "GKI/below-kernel-6.12" ]]; then
+		# For GKI below kernel 6.12, apply the sysvipc kABI patch.
+		apply_patch "${patch_root}/${SYSVIPC_KABI_PATCH}" 1 \
+			|| warn "Droidspaces KABI patch ${SYSVIPC_KABI_PATCH} did not apply cleanly, continuing"
+		if [[ "$kver" == "5.4" || "$kver" == "5.10" ]]; then
+			# For GKI kernel 5.10 or lower, also apply the POSIX_MQUEUE kABI patch.
+			apply_patch "${patch_root}/002.5.10_or_lower_use_android_abi_padding_for_posix_mqueue.patch" 1 \
+				|| warn "Droidspaces POSIX_MQUEUE kABI patch did not apply cleanly, continuing"
+		fi
+	else
+		# For other kernel versions, apply all patches in the patch root directory.
+		for patch in "${patch_root}"/*.patch; do
+			apply_patch "$patch" 1 \
+				|| warn "Droidspaces patch $(basename "$patch") did not apply cleanly, continuing"
+		done
+	fi
+
+	local defconfig="arch/${ARCH}/configs/${KERNEL_CONFIG}"
+	# Common requirements: IPC, PID/IPC namespaces, Devtmpfs, NAT, NAT66, unsafe procfs fix, UFW, Fail2ban, tmpfs ACLs
+	kconf_set_many "$defconfig" \
+		CONFIG_SYSVIPC=y CONFIG_POSIX_MQUEUE=y \
+		CONFIG_PID_NS=y	CONFIG_IPC_NS=y \
+		CONFIG_DEVTMPFS=y \
+		CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y \
+		CONFIG_USER_NS=y \
+		CONFIG_IP6_NF_NAT=y CONFIG_IP6_NF_TARGET_MASQUERADE=y \
+		CONFIG_NETFILTER_XT_TARGET_REJECT=y CONFIG_NETFILTER_XT_TARGET_LOG=y CONFIG_NETFILTER_XT_MATCH_RECENT=y \
+		CONFIG_IP_SET=y CONFIG_IP_SET_HASH_IP=y CONFIG_IP_SET_HASH_NET=y CONFIG_NETFILTER_XT_SET=y \
+		CONFIG_TMPFS_POSIX_ACL=y CONFIG_TMPFS_XATTR=y
+	# Additional requirements for non-GKI kernels: Sysctl, Namespaces, Seccomp, Cgroups, Limits, FW-Loader, Network, Compatibility, Firewall
+	if [[ "$patch_dir" == "non-GKI" ]]; then
+		kconf_set_many "$defconfig" \
+			CONFIG_SYSCTL=y \
+			\
+			CONFIG_NAMESPACES=y \
+			CONFIG_UTS_NS=y \
+			\
+			CONFIG_SECCOMP=y \
+			CONFIG_SECCOMP_FILTER=y \
+			\
+			CONFIG_CGROUPS=y \
+			CONFIG_CGROUP_DEVICE=y \
+			CONFIG_CGROUP_SCHED=y \
+			CONFIG_FAIR_GROUP_SCHED=y \
+			CONFIG_CGROUP_FREEZER=y \
+			CONFIG_CGROUP_NET_PRIO=y \
+			\
+			CONFIG_MEMCG=y \
+			CONFIG_CFS_BANDWIDTH=y \
+			CONFIG_CGROUP_PIDS=y \
+			CONFIG_CGROUP_CPUACCT=y \
+			\
+			CONFIG_OVERLAY_FS=y \
+			\
+			CONFIG_FW_LOADER=y \
+			CONFIG_FW_LOADER_USER_HELPER=y \
+			CONFIG_FW_LOADER_COMPRESS=y \
+			\
+			CONFIG_NET_NS=y \
+			CONFIG_VETH=y \
+			CONFIG_BRIDGE=y \
+			CONFIG_NETFILTER=y \
+			CONFIG_BRIDGE_NETFILTER=y \
+			CONFIG_NETFILTER_ADVANCED=y \
+			CONFIG_NF_CONNTRACK=y \
+			CONFIG_IP_NF_IPTABLES=y \
+			CONFIG_IP_NF_FILTER=y \
+			CONFIG_NF_NAT=y \
+			CONFIG_NF_TABLES=y \
+			CONFIG_IP_NF_TARGET_MASQUERADE=y \
+			CONFIG_NETFILTER_XT_TARGET_MASQUERADE=y \
+			CONFIG_NETFILTER_XT_TARGET_TCPMSS=y \
+			CONFIG_NF_CONNTRACK_NETLINK=y \
+			CONFIG_NF_NAT_REDIRECT=y \
+			CONFIG_IP_ADVANCED_ROUTER=y \
+			CONFIG_IP_MULTIPLE_TABLES=y \
+			\
+			CONFIG_IPV6=y \
+			CONFIG_IPV6_MULTIPLE_TABLES=y \
+			CONFIG_IP6_NF_IPTABLES=y \
+			CONFIG_IP6_NF_FILTER=y \
+			CONFIG_IP6_NF_MANGLE=y \
+			\
+			CONFIG_ANDROID_PARANOID_NETWORK=n \
+			\
+			CONFIG_NF_CONNTRACK_IPV4=y \
+			CONFIG_NF_NAT_IPV4=y \
+			CONFIG_IP_NF_NAT=y \
+			\
+			CONFIG_NF_CONNTRACK_IPV6=y \
+			CONFIG_NF_NAT_IPV6=y \
+			\
+			CONFIG_NETFILTER_XT_MATCH_COMMENT=y \
+			CONFIG_NETFILTER_XT_MATCH_STATE=y \
+			CONFIG_NETFILTER_XT_MATCH_CONNTRACK=y \
+			CONFIG_NETFILTER_XT_MATCH_MULTIPORT=y \
+			CONFIG_NETFILTER_XT_MATCH_HL=y \
+			CONFIG_IP_NF_TARGET_REJECT=y \
+			CONFIG_IP_NF_TARGET_ULOG=y \
+			CONFIG_NETFILTER_XT_MATCH_LIMIT=y \
+			CONFIG_NETFILTER_XT_MATCH_HASHLIMIT=y \
+			CONFIG_NETFILTER_XT_MATCH_OWNER=y \
+			CONFIG_NETFILTER_XT_MATCH_PKTTYPE=y \
+			CONFIG_NETFILTER_XT_MATCH_MARK=y \
+			CONFIG_NETFILTER_XT_TARGET_MARK=y \
+			CONFIG_NETFILTER_NETLINK_QUEUE=y \
+			CONFIG_NETFILTER_NETLINK_LOG=y \
+			CONFIG_NETFILTER_XT_TARGET_NFLOG=y
+	fi
+
+	endgroup
+}
+
 # --------------------------------------------------------------------- main ---
 
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
@@ -370,6 +526,8 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
 		hide_stuff)   hide_stuff_apply ;;
 		hooks)        hooks_patch_apply ;;
 		kpm)          kpm_patch_image "$2" ;;
+		custom)       custom_apply ;;
+		droidspaces)  droidspaces_apply ;;
 		all)
 			# Order matters and this is the tested one (4.19 + SukiSU builtin
 			# + SUSFS 1.5.5, no rejects):
@@ -387,6 +545,8 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
 
 			if is_true "${ENABLE_SUSFS:-false}";      then susfs_apply;      fi
 			if is_true "${ENABLE_HIDE_STUFF:-false}"; then hide_stuff_apply; fi
+			if is_true "${ENABLE_CUSTOM_PATCHES:-false}"; then custom_apply; fi
+			if is_true "${ENABLE_DROIDSPACES:-false}"; then droidspaces_apply; fi
 			;;
 		*) die "unknown patch step '$1'" ;;
 	esac
