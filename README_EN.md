@@ -183,3 +183,94 @@ patches/
 - [susfs4ksu](https://gitlab.com/simonpunk/susfs4ksu)
 - [SukiSU_patch](https://github.com/ShirkNeko/SukiSU_patch)
 - [xiaoxindada](https://github.com/xiaoxindada)
+
+# Droidspaces Action
+
+[中文](README.md#droidspaces-action) | **English**
+
+`ENABLE_DROIDSPACES=true` enables [Droidspaces](https://github.com/ravindu644/Droidspaces-OSS) kernel patches and configures related kernel options for container runtime environments.
+
+This Action references the [Droidspaces kernel configuration guide](https://github.com/ravindu644/Droidspaces-OSS/blob/v6.6.0/Documentation/Kernel-Configuration.md), attempts to apply the corresponding patches, and enables the kernel configurations required for running containers, including network isolation and firewall-related options. Whether specific features are available still depends on the target kernel version, configuration dependencies, patch compatibility, and the device runtime environment.
+
+To trim features or reduce kernel configuration changes, check `scripts/patches.sh` and confirm that your modifications will not break the runtime dependencies you need.
+
+Make sure you have read the relevant documentation and **know what you are doing**.
+
+> [!TIP]
+> 
+> If you already have a kernel build environment, you can clone this repository, set the configuration environment variables, and apply the corresponding changes to your existing kernel source tree, for example:
+>
+> ```bash
+> . scripts/config.sh; ENABLE_DROIDSPACES=true ENABLE_CUSTOM_PATCHES=true KERNEL_DIR=/path/to/src bash scripts/patches.sh
+> ```
+>
+> To apply all patches from this repository, run the following commands:
+>
+> (Note: the stock kernel configuration is applied during the `build.sh` stage.)
+>
+> ```bash
+> . config.env 2>/dev/null; . scripts/config.sh; set +e; export KERNEL_DIR=/path/to/src; bash scripts/kernelsu.sh; KSU_DIR=$KERNEL_DIR/KernelSU bash scripts/patches.sh
+> ```
+
+## Supported kernels
+
+| Kernel version | Patch directory | Patches applied |
+| --- | --- | --- |
+| `3.x`, `4.x` | `non-GKI/` | All patches in the directory |
+| `5.x`, `6.1`, `6.6` | `GKI/below-kernel-6.12/` | `SYSVIPC_KABI_PATCH`; for 5.4/5.10 also apply `002.5.10_or_lower_use_android_abi_padding_for_posix_mqueue.patch` |
+| `6.12` | `GKI/kernel-6.12/` | All patches in the directory |
+
+> [!CAUTION]
+>
+> GrapheneOS and SuSFS are not supported when the Droidspaces feature is enabled. Refer to the [Droidspaces Rooting Requirements](https://github.com/ravindu644/Droidspaces-OSS/blob/v6.6.0/README.md#rooting-requirements) for more information.
+
+### Stock kernel configuration
+
+Android devices check whether the kernel configuration matches device compatibility requirements via `/proc/config.gz`. After enabling `ENABLE_STOCKCONFIG`, the build script attempts to use the repository's original kernel configuration as the `IKCONFIG` data source, in order to bypass VINTF kernel configuration checks.
+
+This feature does not disable VINTF checks and does not guarantee that all boot compatibility issues will be resolved.
+
+When this feature is enabled, Actions additionally uploads the actual build configuration `out/.config` as a config artifact. The `Release` packaging step also attempts to compress it to produce `release/config.gz`.
+
+> [!TIP]
+> 
+> In general, enabling this configuration can fix the `There's an internal problem with your device. Contact your manufacturer for details.` boot error popup; some third-party kernels already include similar functionality.
+> 
+> When troubleshooting missing kernel features, **prioritize checking the actual build configuration**, and do not judge which options are enabled in the actual kernel based on `/proc/config.gz` or `KERNEL_CONFIG`.
+
+## Custom patches
+
+`ENABLE_CUSTOM_PATCHES=true` attempts to apply `${REPO_ROOT}/patches/*.patch` in sequence, then removes the `-dirty` string from `${KERNEL_DIR}/scripts/setlocalversion`, and executes the script when `${REPO_ROOT}/patches/custom.sh` exists.
+
+> [!WARNING]
+> 
+> When custom patches or Droidspaces kernel patches fail to apply, the build **will not be terminated**. You need to check the Action logs to confirm whether the patches were applied successfully.
+>
+> Custom patches are applied before Droidspaces patches. If patches depend on a specific code state or conflict with preceding patches, you must adjust the order yourself and verify the final source. This documentation may be outdated; refer to the actual source code for the current behavior.
+
+Reference patch sources:
+- [Droidspaces_Kernel_patch](https://github.com/Goldzxcbug/Droidspaces_Kernel_patch): CVE-UserNS, NTsync, cgroup_limits
+- [android-gki-custom](https://github.com/1orz/android-gki-custom/tree/main/patches/android12-5.10): Ignore CRC checks, Overlayfs f2fs fix
+- [WildKernels](https://github.com/WildKernels/kernel_patches): common
+- [AOSP kernel source](https://android.googlesource.com/kernel/common): `git diff a..b path/to/file`
+
+## Droidspaces configuration options
+
+See [`config.sh`](scripts/config.sh); the most commonly used options:
+
+| Option | Description |
+| --- | --- |
+| `ENABLE_DROIDSPACES` | Enable Droidspaces kernel patches and configuration |
+| `SYSVIPC_KABI_PATCH` | Only effective for kernel versions `5.x`, `6.1`, `6.6`; specifies the sysvipc kABI patch |
+| `ENABLE_STOCKCONFIG` | Enable Android stock kernel configuration, bypass VINTF compatibility checks, and package the actual build configuration |
+| `ENABLE_CUSTOM_PATCHES` | Enable custom patches and scripts, and remove the `-dirty` string |
+
+## Additional repository structure
+
+If `patches/*.patch` or `patches/custom.sh` does not exist, the corresponding patch or script processing is skipped.
+
+```
+patches/
+  custom.sh            Custom script; can use all functions and variables from patches.sh
+  *.patch              Custom patches
+```

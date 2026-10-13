@@ -179,3 +179,92 @@ patches/
 - [susfs4ksu](https://gitlab.com/simonpunk/susfs4ksu)
 - [SukiSU_patch](https://github.com/ShirkNeko/SukiSU_patch)
 - [xiaoxindada](https://github.com/xiaoxindada)
+
+# Droidspaces Action
+
+**中文** | [English](README_EN.md#droidspaces-action)
+
+`ENABLE_DROIDSPACES=true` 以启用 [Droidspaces](https://github.com/ravindu644/Droidspaces-OSS) 内核补丁，并为容器运行环境配置相关内核选项。
+
+本 Action 参考 [Droidspaces 内核配置指南](https://github.com/ravindu644/Droidspaces-OSS/blob/v6.6.0/Documentation/zh-CN/Kernel-Configuration.md)，尝试应用相应补丁并启用容器运行所需的内核配置，包括网络隔离与防火墙相关选项。具体功能是否可用，仍取决于目标内核版本、配置依赖、补丁兼容性及设备运行环境。
+
+如需裁剪功能或减少内核配置变更，请检查 `scripts/patches.sh`，并确认修改不会破坏你所需要的运行依赖。
+
+确保你已阅读相关文档且**知道自己在做什么**。
+
+> [!TIP]
+> 
+> 如果你已有内核构建环境，可以克隆此仓库，并设置配置项环境变量，在现有内核源码中应用对应的更改，例如：
+>
+> ```bash
+> . scripts/config.sh; set +e; ENABLE_DROIDSPACES=true ENABLE_CUSTOM_PATCHES=true KERNEL_DIR=/path/to/src bash scripts/patches.sh
+> ```
+>
+> 要应用此仓库的全部补丁，请使用以下命令：
+>
+> （注：固定内核配置是在 `build.sh` 阶段完成的）
+>
+> ```bash
+> . config.env 2>/dev/null; . scripts/config.sh; set +e; export KERNEL_DIR=/path/to/src; bash scripts/kernelsu.sh; KSU_DIR=$KERNEL_DIR/KernelSU bash scripts/patches.sh
+> ```
+
+## 支持范围
+
+| 内核版本 | 补丁目录 | 应用的补丁 |
+| --- | --- | --- |
+| `3.x`、`4.x` | `non-GKI/` | 目录内全部补丁 |
+| `5.x`、`6.1`、`6.6` | `GKI/below-kernel-6.12/` | `SYSVIPC_KABI_PATCH`；若为 5.4/5.10 再追加 `002.5.10_or_lower_use_android_abi_padding_for_posix_mqueue.patch` |
+| `6.12` | `GKI/kernel-6.12/` | 目录内全部补丁 |
+
+> [!CAUTION]
+>
+> **启用 Droidspaces 功能时不支持 GrapheneOS 与 SuSFS** - 详情请参考 [Droidspaces Root 需求](https://github.com/ravindu644/Droidspaces-OSS/blob/v6.6.0/Documentation/zh-CN/README.md#root-%E9%9C%80%E6%B1%82)。
+
+### 固定内核配置
+
+Android 设备会通过 `/proc/config.gz` 检查内核配置与设备兼容性要求是否一致。启用 `ENABLE_STOCKCONFIG` 后，构建脚本会尝试使用仓库的原始内核配置作为 `IKCONFIG` 数据来源，以绕过 VINTF 对内核配置的检查。
+
+此功能不等于禁用 VINTF 检查，也不能保证修复所有启动兼容性问题。
+
+当启用该功能时，Actions 会额外上传实际构建配置 `out/.config` 作为 config artifact。`Release` 打包步骤还会尝试把其压缩为 `release/config.gz`。
+
+> [!TIP]
+> 
+> 一般而言，启用此配置即可修复`您的设备内部出现了问题，请联系您的制造商了解详情`开机错误弹窗，部分第三方内核已内置了类似的功能。
+> 
+> 排查内核功能缺失时，应**优先检查实际构建配置**，而不要依据 `/proc/config.gz` 或 `KERNEL_CONFIG` 判断实际内核启用了哪些选项。
+
+## 自定义补丁
+`ENABLE_CUSTOM_PATCHES=true` 会依次尝试应用 `${REPO_ROOT}/patches/*.patch`，随后从 `${KERNEL_DIR}/scripts/setlocalversion` 中删除 `-dirty` 字符串，并在存在 `${REPO_ROOT}/patches/custom.sh` 时执行该脚本。
+
+> [!WARNING]
+> 
+> 自定义补丁与 Droidspaces 内核补丁应用失败时都**不会终止构建**，你需要检查 Action 的日志以确认补丁是否应用成功。
+>
+> 自定义补丁在 Droidspaces 补丁之前应用。若补丁依赖特定代码状态或与前序补丁存在冲突，需自行调整顺序并验证最终源码。此文档可能过时，请以实际源码为准。
+
+可供参考的补丁来源：
+- [Droidspaces_Kernel_patch](https://github.com/Goldzxcbug/Droidspaces_Kernel_patch): CVE-UserNS, NTsync, cgroup_limits
+- [android-gki-custom](https://github.com/1orz/android-gki-custom/tree/main/patches/android12-5.10): Ignore CRC checks, Overlayfs f2fs fix
+- [WildKernels](https://github.com/WildKernels/kernel_patches): common
+- [AOSP内核源码](https://android.googlesource.com/kernel/common): `git diff a..b path/to/file`
+
+## Droidspaces 配置项
+见 [`config.sh`](scripts/config.sh)，几个常用的：
+
+| 选项 | 说明 |
+| --- | --- |
+| `ENABLE_DROIDSPACES` | 启用 Droidspaces 内核补丁与配置 |
+| `SYSVIPC_KABI_PATCH` | 仅在内核版本 `5.x`、`6.1`、`6.6` 有效，用于指定 sysvipc kABI 补丁 |
+| `ENABLE_STOCKCONFIG` | 启用 Android 固定内核配置，绕过 VINTF 兼容性检查，打包实际构建配置 |
+| `ENABLE_CUSTOM_PATCHES` | 启用自定义补丁与脚本，去除 `-dirty` 字符串 |
+
+## 额外仓库结构
+
+若不存在 `patches/*.patch` 或 `patches/custom.sh`，则跳过对应的补丁或脚本处理。
+
+```
+patches/
+  custom.sh            自定义脚本，可使用 patches.sh 中所有函数与变量
+  *.patch              自定义补丁
+```
